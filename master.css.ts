@@ -1,0 +1,41 @@
+import type { Config } from '@master/css'
+
+export default {
+	modeTrigger: 'class',
+	defaultMode: 'light',
+	variables: {
+		'cv-bg': '#2c3e6b',
+		'sb-bg': '#3a4f7a',
+		'sb-bd': '#4a5f8a',
+		'sb-tx': '#e0e6f0',
+		'sb-ih': '#5a6f9a',
+		'hd-bg': '#3a4f7a',
+		'hd-tx': '#ffffff',
+		'ed-bg': '#f5f5f5',
+		'edtb-bg': '#e8edf5',
+		'edtb-bd': '#c8d0e0',
+		'pri': '#4a90d9',
+		'conn': '#f5c542',
+		'sel': '#4a90d9',
+		'cds': 'rgb(0 0 0 / 0.25)',
+		'tx': '#1a1a2e',
+		'sf': '#ffffff',
+		'bd': '#d0d5e0',
+	},
+	modes: {
+		dark: {
+			'cv-bg': '#1a2040',
+			'sb-bg': '#252b50',
+			'sb-bd': '#353b60',
+			'sb-tx': '#c0c8e0',
+			'sb-ih': '#454b70',
+			'hd-bg': '#252b50',
+			'ed-bg': '#1e1e2e',
+			'edtb-bg': '#2a2a3e',
+			'edtb-bd': '#3a3a4e',
+			'tx': '#e0e6f0',
+			'sf': '#2a2a3e',
+			'bd': '#3a3a4e',
+		},
+	},
+} as Config
