@@ -1,77 +1,76 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+このファイルは、リポジトリ内のコードを扱う Claude Code (claude.ai/code) に対してガイダンスを提供します。
 
-## Commands
+## コマンド
 
 ```bash
-bun run dev          # start dev server
-bun run build        # production build
-bun run preview      # preview production build
-bun run check        # svelte-check + TypeScript
-bun run check:watch  # watch mode
+bun run dev          # 開発サーバー起動
+bun run build        # プロダクションビルド
+bun run preview      # プロダクションビルドのプレビュー
+bun run check        # svelte-check + TypeScript 型チェック
+bun run check:watch  # ウォッチモード
 bun run lint         # prettier --check + eslint
 bun run format       # prettier --write
 ```
 
-There is no test suite configured.
+テストスイートは設定されていません。
 
-## Architecture
+## アーキテクチャ
 
-This is a **SvelteKit** single-page app (Svelte 5 with runes) modeled after LoiLoNote — a Japanese educational card-canvas tool.
+**SvelteKit** のシングルページアプリ（Svelte 5 / runes）。LoiLoNote（日本の教育用カード・キャンバスツール）をモデルにしています。
 
-### Two-layer view model
+### 2層のビューモデル
 
-The entire app is a single route (`src/routes/+page.svelte`). `viewMode` state switches between two full-screen layers:
+アプリ全体は単一ルート（`src/routes/+page.svelte`）で構成されており、`viewMode` 状態により2つの全画面レイヤーを切り替えます。
 
-1. **`canvas`** — `NoteCanvas.svelte`: infinite pan/zoom canvas where `Card` objects are positioned absolutely. An SVG overlay renders `Connector` lines between cards. All pointer interaction (drag, pan, zoom, connector drawing, inline text edit) is handled in this component.
+1. **`canvas`** — `NoteCanvas.svelte`：`Card` オブジェクトを絶対位置で配置する無限パン・ズームキャンバス。SVG オーバーレイでカード間の `Connector` 矢印を描画します。ドラッグ・パン・ズーム・コネクター描画・インラインテキスト編集など、すべてのポインター操作をこのコンポーネントが担います。
 
-2. **`editor`** — `CardEditor.svelte`: full-screen Fabric.js canvas for rich editing of a single card (pen, highlighter, eraser, shapes, text). On back/Escape, serialises the Fabric canvas to JSON and calls `onSave`.
+2. **`editor`** — `CardEditor.svelte`：単一カードのリッチ編集用 Fabric.js 全画面キャンバス（ペン・マーカー・消しゴム・図形・テキスト）。戻るボタンまたは Escape で Fabric キャンバスを JSON にシリアライズし `onSave` を呼び出します。
 
-### State ownership
+### 状態の管理
 
-All mutable state (`notes`, `currentNoteId`, `viewMode`, `editingCardId`, `selectedCardId`) lives in `+page.svelte`. Components receive data as props and communicate upward through typed callback props (`onCardMove`, `onCardOpen`, `onSave`, etc.). Components never mutate shared state directly.
+すべての可変状態（`notes`・`currentNoteId`・`viewMode`・`editingCardId`・`selectedCardId`）は `+page.svelte` に集約されています。コンポーネントはプロパティでデータを受け取り、型付きコールバックプロパティ（`onCardMove`・`onCardOpen`・`onSave` など）で上位に通知します。コンポーネントが共有状態を直接変更することはありません。
 
-### Data model (`src/lib/types/index.ts`)
+### データモデル（`src/lib/types/index.ts`）
 
-- `Note` — top-level document: contains arrays of `Card` and `Connector`, plus trash/folder metadata.
-- `Card` — positioned rectangle on the canvas. `type` is `'text' | 'image' | 'pdf'`. `editorData` holds serialised Fabric.js JSON (null until the card has been opened in the editor).
-- `Connector` — a directed edge between two card IDs, rendered as a yellow arrow.
+- `Note` — 最上位ドキュメント。`Card` と `Connector` の配列、およびゴミ箱・フォルダのメタデータを持ちます。
+- `Card` — キャンバス上に配置された矩形。`type` は `'text' | 'image' | 'pdf'`。`editorData` はシリアライズ済み Fabric.js JSON を保持します（エディターで一度も開いていない場合は `null`）。
+- `Connector` — 2つのカード ID 間の有向エッジ。黄色い矢印として描画されます。
 
-### Persistence (`src/lib/utils/db.ts`)
+### 永続化（`src/lib/utils/db.ts`）
 
-Uses **IndexedDB** via `idb` with an in-memory `Map` fallback. The `useMemory` flag at the top of the file controls which path is active — it is currently set to `true` (in-memory only) for sandboxed deploy environments. Set it to `false` for full local persistence. Data is auto-saved every 5 s and on explicit Ctrl+S. Export/import is plain JSON (`version: 3`).
+`idb` を通じた **IndexedDB** と、インメモリ `Map` のフォールバックを使用します。ファイル冒頭の `useMemory` フラグで切り替えます。現在は `true`（インメモリのみ）に設定されており、サンドボックス化されたデプロイ環境向けです。ローカル開発で完全な永続化を行う場合は `false` に変更してください。データは 5 秒ごと、および Ctrl+S で自動保存されます。エクスポート・インポートはプレーン JSON（`version: 3`）です。
 
-### Styling
+### スタイリング
 
-Uses **Master CSS** (`@master/css`) — an atomic CSS-in-JS framework configured in `master.css.ts`. Styles are written as space-separated utility class strings directly in the markup (e.g. `"d:flex ai:center gap:8px"`), not Tailwind.
+**Master CSS**（`@master/css`）を使用します。`master.css.ts` で設定されたアトミック CSS-in-JS フレームワークです。スタイルはマークアップ内でスペース区切りのユーティリティクラス文字列として記述します（例：`"d:flex ai:center gap:8px"`）。Tailwind ではありません。
 
-Design tokens are CSS variables defined in `master.css.ts` and referenced with the `$` sigil in classes (e.g. `bg:$sb-bg`). Light/dark mode is toggled by adding/removing the `dark` class on `<html>`. Key tokens:
+デザイントークンは `master.css.ts` で CSS 変数として定義され、クラス内では `$` シジルで参照します（例：`bg:$sb-bg`）。ライト/ダークモードの切り替えは `<html>` への `dark` クラスの付け外しで行います。主なトークン：
 
-| Token | Purpose |
+| トークン | 用途 |
 |---|---|
-| `cv-bg` | Canvas background (navy) |
-| `sb-bg / sb-bd / sb-tx / sb-ih` | Sidebar surface/border/text/hover |
-| `hd-bg / hd-tx` | Header bar |
-| `ed-bg / edtb-bg / edtb-bd` | Card editor surface/toolbar |
-| `pri` | Primary accent (`#4a90d9`) |
-| `conn` | Connector arrow colour (yellow `#f5c542`) |
-| `sel` | Card selection border |
-| `tx / sf / bd` | Body text / surface / border |
+| `cv-bg` | キャンバス背景（ネイビー） |
+| `sb-bg / sb-bd / sb-tx / sb-ih` | サイドバーの面・境界・テキスト・ホバー |
+| `hd-bg / hd-tx` | ヘッダーバー |
+| `ed-bg / edtb-bg / edtb-bd` | カードエディターの面・ツールバー |
+| `pri` | プライマリアクセント（`#4a90d9`） |
+| `conn` | コネクター矢印の色（黄色 `#f5c542`） |
+| `sel` | カード選択時のボーダー |
+| `tx / sf / bd` | 本文テキスト・面・境界線 |
 
-### Key dependencies
+### 主な依存ライブラリ
 
-- **Fabric.js** (`fabric` v7) — powers the card editor canvas: free drawing, IText, shapes, undo/redo stack.
-- **pdf.js** (`pdfjs-dist`) — renders PDF pages to canvas data URLs on import.
-- **idb** — IndexedDB wrapper for note persistence.
-- **uuid** — generates card/note/connector IDs.
-- **jsPDF** — available but not yet wired into the UI.
+- **Fabric.js**（`fabric` v7） — カードエディターキャンバスの中核。フリードロー・IText・図形・アンドゥ/リドゥスタックを担います。
+- **pdf.js**（`pdfjs-dist`） — インポート時に PDF ページをキャンバスの data URL にレンダリングします。
+- **idb** — IndexedDB ラッパー。ノートの永続化に使用します。
+- **uuid** — カード・ノート・コネクターの ID 生成に使用します。
+- **jsPDF** — 依存関係には含まれていますが、まだ UI に組み込まれていません。
 
-## Conventions
+## 規約
 
-- **Svelte 5 runes** — use `$state`, `$derived`, `$props`, `$effect`. Do not use the legacy `export let` / reactive `$:` syntax.
-- **No comments on obvious code** — the existing codebase is largely comment-free; match that style.
-- **Japanese UI strings** — all visible labels and tooltips are in Japanese (e.g. `テキスト`, `削除`, `戻る`). Keep new UI strings in Japanese.
-- **Card colors** — use the `CARD_COLORS` palette from `src/lib/types/index.ts` rather than ad-hoc hex values.
-- **Double-click detection** — `NoteCanvas` implements its own double-click via two single-click events within 400 ms (native `dblclick` is unreliable on pointer-captured elements).
-- **`useMemory` flag** — when adding persistence features, respect the in-memory fallback path; both `db` (IndexedDB) and `mem*` (Map) branches must stay in sync.
+- **Svelte 5 runes** — `$state`・`$derived`・`$props`・`$effect` を使用します。旧来の `export let` や `$:` リアクティブ構文は使用しません。
+- **UI 文字列は日本語** — すべての表示ラベルとツールチップは日本語です（例：`テキスト`・`削除`・`戻る`）。新しい UI 文字列も日本語で記述してください。
+- **カード色** — アドホックな hex 値ではなく、`src/lib/types/index.ts` の `CARD_COLORS` パレットを使用します。
+- **ダブルクリック検出** — `NoteCanvas` は 400 ms 以内の 2 回のシングルクリックで独自にダブルクリックを実装しています（ポインターキャプチャ中はネイティブの `dblclick` が不安定なため）。
+- **`useMemory` フラグ** — 永続化機能を追加する際は、インメモリフォールバックのパスも考慮し、`db`（IndexedDB）と `mem*`（Map）の両方のブランチを同期して保つようにしてください。
