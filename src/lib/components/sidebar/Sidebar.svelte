@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import type { Note, Folder } from '$lib/types';
+	import { CARD_COLORS } from '$lib/types';
 	import { tick } from 'svelte';
 
 	interface Props {
@@ -9,9 +10,10 @@
 		currentNoteId: string | null;
 		theme: 'light' | 'dark';
 		showNoteList: boolean;
-		onCreateTextCard: () => void;
+		onCreateTextCard: (color: string) => void;
 		onCreateImageCard: () => void;
 		onCreatePDFCard: () => void;
+		onCreateWebCard: () => void;
 		onToggleNoteList: () => void;
 		onSelectNote: (id: string) => void;
 		onCreateNote: () => void;
@@ -31,6 +33,7 @@
 		onCreateTextCard,
 		onCreateImageCard,
 		onCreatePDFCard,
+		onCreateWebCard,
 		onToggleNoteList,
 		onSelectNote,
 		onCreateNote,
@@ -45,6 +48,7 @@
 	let renameValue = $state('');
 	let renameInputEl = $state<HTMLInputElement | null>(null);
 	let hoveredNoteId = $state<string | null>(null);
+	let showTextColors = $state(false);
 
 	$effect(() => {
 		if (renamingId !== null) {
@@ -80,14 +84,38 @@
 
 		<div class="w:32px h:1px bg:$sb-bd my:6px"></div>
 
-		<button class="d:flex flex:column ai:center jc:center w:48px h:48px r:10px color:$sb-tx gap:1px bg:$sb-ih:hover" onclick={onCreateTextCard} title="テキストカード">
-			<span class="font-size:18px font-weight:700 lh:1">あ</span>
-			<span class="font-size:8px opacity:.8 lh:1">テキスト</span>
-		</button>
+		<div class="position:relative">
+			<button class={`d:flex flex:column ai:center jc:center w:48px h:48px r:10px color:$sb-tx gap:1px bg:$sb-ih:hover ${showTextColors ? 'bg:$sb-ih' : ''}`} onclick={() => (showTextColors = !showTextColors)} title="テキストカード（色を選んで作成）">
+				<span class="font-size:18px font-weight:700 lh:1">あ</span>
+				<span class="font-size:8px opacity:.8 lh:1">テキスト</span>
+			</button>
+
+			<!-- Card color palette (LoiLoNote: pick a color, then the card is created) -->
+			{#if showTextColors}
+				<div class="position:absolute left:54px top:0 d:flex gap:6px flex-wrap:wrap w:152px p:8px bg:$sf b:1|solid|$bd r:10px box-shadow:0|4px|16px|rgb(0_0_0/.3) z:30">
+					{#each CARD_COLORS as color (color)}
+						<button
+							aria-label="カードの色"
+							class="w:28px h:28px r:6px b:1|solid|rgb(0_0_0/.15) cursor:pointer transform:scale(1.12):hover"
+							style="background: {color};"
+							onclick={() => {
+								onCreateTextCard(color);
+								showTextColors = false;
+							}}
+						></button>
+					{/each}
+				</div>
+			{/if}
+		</div>
 
 		<button class="d:flex flex:column ai:center jc:center w:48px h:48px r:10px color:$sb-tx gap:1px bg:$sb-ih:hover" onclick={onCreateImageCard} title="画像カード">
 			<Icon name="image" size={22} />
 			<span class="font-size:8px opacity:.8 lh:1">画像</span>
+		</button>
+
+		<button class="d:flex flex:column ai:center jc:center w:48px h:48px r:10px color:$sb-tx gap:1px bg:$sb-ih:hover" onclick={onCreateWebCard} title="Webカード">
+			<span class="font-size:18px lh:1">🌐</span>
+			<span class="font-size:8px opacity:.8 lh:1">Web</span>
 		</button>
 
 		<button class="d:flex flex:column ai:center jc:center w:48px h:48px r:10px color:$sb-tx gap:1px bg:$sb-ih:hover" onclick={onCreatePDFCard} title="PDFカード">

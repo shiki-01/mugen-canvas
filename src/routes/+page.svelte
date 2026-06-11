@@ -4,8 +4,10 @@
   import Sidebar from "$lib/components/sidebar/Sidebar.svelte";
   import NoteCanvas from "$lib/components/canvas/NoteCanvas.svelte";
   import CardEditor from "$lib/components/canvas/CardEditor.svelte";
+  import PresentationView from "$lib/components/canvas/PresentationView.svelte";
   import type { Note, Card, Connector, ViewMode, Folder } from "$lib/types";
   import { CARD_COLORS } from "$lib/types";
+  import { getChain, getPresentationOrder } from "$lib/utils/chain";
   import {
     getAllNotes,
     saveNote,
@@ -31,6 +33,8 @@
   );
 
   let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+  let noteCanvas = $state<NoteCanvas | null>(null);
+  let presentationCards = $state<Card[]>([]);
 
   // Derived
   let currentNote = $derived(notes.find((n) => n.id === currentNoteId) ?? null);
@@ -132,18 +136,24 @@
 
   // === Card management ===
 
-  function createCard(type: "text" | "image" | "pdf", extra?: Partial<Card>) {
+  function createCard(
+    type: "text" | "image" | "pdf" | "web",
+    extra?: Partial<Card>,
+  ) {
     if (!currentNote) return;
+    // Place new cards near the center of the current viewport
+    const center = noteCanvas?.getViewportCenter() ?? { x: 0, y: 0 };
     const card: Card = {
       id: uuidv4(),
       type,
-      x: -100 + Math.random() * 200,
-      y: -100 + Math.random() * 200,
+      x: center.x - 90 + (Math.random() - 0.5) * 80,
+      y: center.y - 60 + (Math.random() - 0.5) * 80,
       width: type === "text" ? 180 : 200,
       height: type === "text" ? 120 : 160,
       color: CARD_COLORS[Math.floor(Math.random() * 3)], // random from first 3
       text: "",
       imageDataUrl: null,
+      url: null,
       editorData: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -155,8 +165,20 @@
     return card;
   }
 
-  function handleCreateTextCard() {
-    createCard("text");
+  function handleCreateTextCard(color: string) {
+    createCard("text", { color });
+  }
+
+  function handleCreateWebCard() {
+    const url = window.prompt("WebページのURLを入力してください", "https://");
+    if (!url || url === "https://") return;
+    let label = url;
+    try {
+      label = new URL(url).hostname;
+    } catch {
+      // keep raw input as label
+    }
+    createCard("web", { url, text: label, color: "#ffffff" });
   }
 
   function handleCreateImageCard() {
@@ -315,6 +337,41 @@
     notes = [...notes];
   }
 
+  // Align the connected chain containing the card in a horizontal row (整列)
+  function handleAlignChain(cardId: string) {
+    if (!currentNote) return;
+    const chain = getChain(currentNote.cards, currentNote.connectors, cardId);
+    if (chain.length < 2) return;
+    const gap = 48;
+    const startX = chain[0].x;
+    const centerY = chain[0].y + chain[0].height / 2;
+    let x = startX;
+    for (const card of chain) {
+      card.x = x;
+      card.y = centerY - card.height / 2;
+      x += card.width + gap;
+    }
+    notes = [...notes];
+  }
+
+  // === Presentation (再生) ===
+
+  function startPresentation() {
+    if (!currentNote || currentNote.cards.length === 0) return;
+    presentationCards = getPresentationOrder(
+      currentNote.cards,
+      currentNote.connectors,
+      selectedCardId,
+    );
+    if (presentationCards.length === 0) return;
+    viewMode = "presentation";
+  }
+
+  function exitPresentation() {
+    presentationCards = [];
+    viewMode = "canvas";
+  }
+
   // Editor callbacks
   function handleEditorBack() {
     viewMode = "canvas";
@@ -392,6 +449,7 @@
       onCreateTextCard={handleCreateTextCard}
       onCreateImageCard={handleCreateImageCard}
       onCreatePDFCard={handleCreatePDFCard}
+      onCreateWebCard={handleCreateWebCard}
       onToggleNoteList={() => (showNoteList = !showNoteList)}
       onSelectNote={switchNote}
       onCreateNote={createNote}
@@ -411,10 +469,23 @@
         <span class="font-size:11px opacity:.5">
           {currentNote?.cards.length ?? 0}枚のカード
         </span>
+        <!-- 再生: つないだカードをプレゼンとして再生 (LoiLoNote の青い再生ボタン) -->
+        <button
+          class="d:flex ai:center gap:6px px:14px py:5px r:6px bg:$pri color:#fff font-size:12px font-weight:600 opacity:.9:hover opacity:.4:disabled cursor:not-allowed:disabled"
+          onclick={startPresentation}
+          disabled={!currentNote || currentNote.cards.length === 0}
+          title="つないだカードを順番に再生"
+        >
+          <svg viewBox="0 0 16 16" width="11" height="11">
+            <path d="M4 2.5v11l9-5.5z" fill="currentColor" />
+          </svg>
+          再生
+        </button>
       </div>
 
       {#if currentNote}
         <NoteCanvas
+          bind:this={noteCanvas}
           cards={currentNote.cards}
           connectors={currentNote.connectors}
           {selectedCardId}
@@ -427,6 +498,7 @@
           onCardDelete={handleCardDelete}
           onConnectorCreate={handleConnectorCreate}
           onConnectorDelete={handleConnectorDelete}
+          onAlignChain={handleAlignChain}
         />
       {/if}
     </div>
@@ -435,6 +507,11 @@
       card={editingCard}
       onBack={handleEditorBack}
       onSave={handleEditorSave}
+    />
+  {:else if viewMode === "presentation"}
+    <PresentationView
+      cards={presentationCards}
+      onExit={exitPresentation}
     />
   {/if}
 </div>

@@ -15,13 +15,14 @@
     onCardDelete: (id: string) => void;
     onConnectorCreate: (fromId: string, toId: string) => void;
     onConnectorDelete: (id: string) => void;
+    onAlignChain: (cardId: string) => void;
     selectedCardId: string | null;
   }
 
   let {
     cards, connectors, onCardSelect, onCardOpen, onCardMove,
     onCardResize, onCardTextChange, onCardColorChange, onCardDelete,
-    onConnectorCreate, onConnectorDelete, selectedCardId,
+    onConnectorCreate, onConnectorDelete, onAlignChain, selectedCardId,
   }: Props = $props();
 
   let containerEl: HTMLDivElement;
@@ -43,6 +44,10 @@
   let dragOffsetX = 0;
   let dragOffsetY = 0;
   let dragMoved = false;
+
+  // Resize card state
+  let isResizing = $state(false);
+  let resizeCardId = $state<string | null>(null);
 
   // Double-click detection
   let lastClickCardId: string | null = null;
@@ -99,8 +104,25 @@
     // Right-click: don't capture, let context menu handler fire
     if (e.button === 2) return;
 
+    // Tap on a connector line: disconnect (LoiLoNote behavior)
+    const connHit = (e.target as Element).closest?.('.connector-hit') as SVGElement | null;
+    if (connHit?.dataset.connId) {
+      onConnectorDelete(connHit.dataset.connId);
+      return;
+    }
+
     const cardTarget = (e.target as HTMLElement).closest('[data-card-id]') as HTMLElement | null;
     const isConnectorHandle = (e.target as HTMLElement).closest('.connector-handle');
+    const isResizeHandle = (e.target as HTMLElement).closest('.resize-handle');
+
+    if (isResizeHandle && cardTarget) {
+      e.preventDefault();
+      e.stopPropagation();
+      isResizing = true;
+      resizeCardId = cardTarget.dataset.cardId!;
+      containerEl.setPointerCapture(e.pointerId);
+      return;
+    }
 
     if (isConnectorHandle) {
       // Start drawing connector
@@ -114,9 +136,9 @@
         if (card) {
           connectorPreview = {
             x1: card.x + card.width,
-            y1: card.y,
+            y1: card.y + card.height / 2,
             x2: card.x + card.width,
-            y2: card.y,
+            y2: card.y + card.height / 2,
           };
         }
         containerEl.setPointerCapture(e.pointerId);
@@ -159,6 +181,15 @@
       return;
     }
 
+    if (isResizing && resizeCardId) {
+      const card = cards.find(c => c.id === resizeCardId);
+      if (card) {
+        const pos = screenToCanvas(e.clientX, e.clientY);
+        onCardResize(resizeCardId, Math.max(80, pos.x - card.x), Math.max(60, pos.y - card.y));
+      }
+      return;
+    }
+
     if (isDragging && dragCardId) {
       dragMoved = true;
       const pos = screenToCanvas(e.clientX, e.clientY);
@@ -176,6 +207,12 @@
   function handlePointerUp(e: PointerEvent) {
     if (isPanning) {
       isPanning = false;
+      return;
+    }
+
+    if (isResizing) {
+      isResizing = false;
+      resizeCardId = null;
       return;
     }
 
@@ -205,13 +242,13 @@
     if (isDrawingConnector && connectorFromId) {
       isDrawingConnector = false;
       connectorPreview = null;
-      // Check if dropped on a card
-      const target = (e.target as HTMLElement).closest('[data-card-id]') as HTMLElement | null;
-      if (target) {
-        const toId = target.dataset.cardId!;
-        if (toId !== connectorFromId) {
-          onConnectorCreate(connectorFromId, toId);
-        }
+      // Find the card under the pointer (e.target is the capture element, so hit-test by coordinates)
+      const pos = screenToCanvas(e.clientX, e.clientY);
+      const target = [...cards].reverse().find(
+        c => pos.x >= c.x && pos.x <= c.x + c.width && pos.y >= c.y && pos.y <= c.y + c.height,
+      );
+      if (target && target.id !== connectorFromId) {
+        onConnectorCreate(connectorFromId, target.id);
       }
       connectorFromId = null;
       return;
@@ -221,25 +258,66 @@
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
-      // Zoom
       const rect = containerEl.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const factor = e.deltaY > 0 ? 0.92 : 1.08;
-      const newScale = Math.max(0.1, Math.min(5, scale * factor));
-      viewX = mx - (mx - viewX) * (newScale / scale);
-      viewY = my - (my - viewY) * (newScale / scale);
-      scale = newScale;
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY > 0 ? 0.92 : 1.08);
     } else {
-      // Pan
       viewX -= e.deltaX;
       viewY -= e.deltaY;
     }
   }
 
+  // === Zoom controls ===
+
+  function zoomAt(mx: number, my: number, factor: number) {
+    const newScale = Math.max(0.1, Math.min(5, scale * factor));
+    viewX = mx - (mx - viewX) * (newScale / scale);
+    viewY = my - (my - viewY) * (newScale / scale);
+    scale = newScale;
+  }
+
+  function zoomByButton(factor: number) {
+    const rect = containerEl.getBoundingClientRect();
+    zoomAt(rect.width / 2, rect.height / 2, factor);
+  }
+
+  function zoomFit() {
+    if (cards.length === 0) {
+      const rect = containerEl.getBoundingClientRect();
+      scale = 1;
+      viewX = rect.width / 2;
+      viewY = rect.height / 2;
+      return;
+    }
+    const minX = Math.min(...cards.map(c => c.x));
+    const minY = Math.min(...cards.map(c => c.y));
+    const maxX = Math.max(...cards.map(c => c.x + c.width));
+    const maxY = Math.max(...cards.map(c => c.y + c.height));
+    const rect = containerEl.getBoundingClientRect();
+    const pad = 60;
+    const fitScale = Math.max(
+      0.1,
+      Math.min(5, Math.min((rect.width - pad * 2) / (maxX - minX), (rect.height - pad * 2) / (maxY - minY))),
+    );
+    scale = fitScale;
+    viewX = rect.width / 2 - ((minX + maxX) / 2) * fitScale;
+    viewY = rect.height / 2 - ((minY + maxY) / 2) * fitScale;
+  }
+
+  // Canvas coordinates at the center of the current viewport (for placing new cards)
+  export function getViewportCenter() {
+    const rect = containerEl.getBoundingClientRect();
+    return screenToCanvas(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
   function handleCardDblClick(cardId: string) {
     const card = cards.find(c => c.id === cardId);
     if (!card) return;
+
+    if (card.type === 'web' && card.url) {
+      // Web cards open the linked page (LoiLoNote web card behavior)
+      window.open(card.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
 
     if (card.type === 'text' && !card.editorData) {
       // Inline text editing for simple text cards
@@ -285,17 +363,31 @@
     }
   }
 
-  // Get connector line endpoints
+  // Intersection of the segment (card center -> target point) with the card's border
+  function edgePoint(card: Card, tx: number, ty: number) {
+    const cx = card.x + card.width / 2;
+    const cy = card.y + card.height / 2;
+    const dx = tx - cx;
+    const dy = ty - cy;
+    if (dx === 0 && dy === 0) return { x: cx, y: cy };
+    const sx = dx !== 0 ? card.width / 2 / Math.abs(dx) : Infinity;
+    const sy = dy !== 0 ? card.height / 2 / Math.abs(dy) : Infinity;
+    const s = Math.min(sx, sy);
+    return { x: cx + dx * s, y: cy + dy * s };
+  }
+
+  // Get connector line endpoints (edge-to-edge, LoiLoNote style)
   function getConnectorLine(conn: Connector) {
     const from = cards.find(c => c.id === conn.fromCardId);
     const to = cards.find(c => c.id === conn.toCardId);
     if (!from || !to) return null;
-    return {
-      x1: from.x + from.width / 2,
-      y1: from.y + from.height / 2,
-      x2: to.x + to.width / 2,
-      y2: to.y + to.height / 2,
-    };
+    const toCx = to.x + to.width / 2;
+    const toCy = to.y + to.height / 2;
+    const fromCx = from.x + from.width / 2;
+    const fromCy = from.y + from.height / 2;
+    const p1 = edgePoint(from, toCx, toCy);
+    const p2 = edgePoint(to, fromCx, fromCy);
+    return { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
   }
 
   function getCardTextColor(bgColor: string): string {
@@ -330,31 +422,45 @@
   onwheel={handleWheel}
   role="application"
 >
-  <!-- SVG connector layer -->
+  <!-- SVG connector layer (pointer-events auto so hit-area lines are clickable) -->
   <svg
-    class="position:absolute inset:0 w:100% h:100% pointer-events:none z:1"
+    class="position:absolute inset:0 w:100% h:100% z:1"
+    style="pointer-events: none;"
     bind:this={svgEl}
   >
     <g transform="translate({viewX},{viewY}) scale({scale})">
-      {#each connectors as conn}
+      {#each connectors as conn (conn.id)}
         {@const line = getConnectorLine(conn)}
         {#if line}
           <line
             x1={line.x1} y1={line.y1}
             x2={line.x2} y2={line.y2}
             stroke="var(--conn)"
-            stroke-width={2.5 / scale}
+            stroke-width={3 / scale}
             stroke-linecap="round"
           />
           <!-- Arrowhead -->
           {@const angle = Math.atan2(line.y2 - line.y1, line.x2 - line.x1)}
-          {@const headLen = 12 / scale}
+          {@const headLen = 14 / scale}
           <polygon
             points="{line.x2},{line.y2}
               {line.x2 - headLen * Math.cos(angle - 0.4)},{line.y2 - headLen * Math.sin(angle - 0.4)}
               {line.x2 - headLen * Math.cos(angle + 0.4)},{line.y2 - headLen * Math.sin(angle + 0.4)}"
             fill="var(--conn)"
           />
+          <!-- Invisible wide hit area: tap the line to disconnect -->
+          <line
+            class="connector-hit"
+            data-conn-id={conn.id}
+            x1={line.x1} y1={line.y1}
+            x2={line.x2} y2={line.y2}
+            stroke="transparent"
+            stroke-width={16 / scale}
+            stroke-linecap="round"
+            style="pointer-events: stroke; cursor: pointer;"
+          >
+            <title>タップして接続を解除</title>
+          </line>
         {/if}
       {/each}
       <!-- Connector preview -->
@@ -395,16 +501,24 @@
         onmouseenter={() => (hoveredCardId = card.id)}
         onmouseleave={() => (hoveredCardId = null)}
       >
-        <!-- Connector handle (yellow arrow, top-right) -->
+        <!-- Connector handle (yellow arrow at right-center edge, LoiLoNote style) -->
         <button
-          class={`connector-handle position:absolute top:-2px right:-2px w:28px h:28px d:flex ai:center jc:center color:$conn cursor:crosshair z:10 transition:opacity|.15s filter:drop-shadow(0|1px|2px|rgb(0_0_0/.3)) ${hoveredCardId === card.id || selectedCardId === card.id ? 'opacity:1' : 'opacity:0 pointer-events:none'}`}
-          title="ドラッグして接続"
+          class={`connector-handle position:absolute top:50% right:-14px translateY(-50%) w:26px h:26px d:flex ai:center jc:center r:50% bg:$conn color:#5b4a00 cursor:crosshair z:10 transition:opacity|.15s box-shadow:0|1px|4px|rgb(0_0_0/.35) ${hoveredCardId === card.id || selectedCardId === card.id ? 'opacity:1' : 'opacity:0 pointer-events:none'}`}
+          title="ドラッグして次のカードへつなぐ"
           onclick={(e) => e.stopPropagation()}
         >
-          <svg viewBox="0 0 16 16" width="14" height="14">
-            <path d="M3 13L13 3M13 3H6M13 3v7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          <svg viewBox="0 0 16 16" width="13" height="13">
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
           </svg>
         </button>
+
+        <!-- Resize handle (bottom-right, selected card only) -->
+        {#if selectedCardId === card.id}
+          <div
+            class="resize-handle position:absolute bottom:-6px right:-6px w:16px h:16px r:50% bg:$sel b:2|solid|#fff cursor:nwse-resize z:10 box-shadow:0|1px|4px|rgb(0_0_0/.35)"
+            title="ドラッグしてサイズ変更"
+          ></div>
+        {/if}
 
         <!-- Card content -->
         <div class="flex:1 px:12px py:10px overflow:hidden d:flex flex:column">
@@ -427,6 +541,14 @@
           {:else if card.type === 'pdf' && card.imageDataUrl}
             <img class="w:100% h:100% object-fit:cover r:2px" src={card.imageDataUrl} alt="PDF" />
             <div class="position:absolute bottom:4px left:4px right:4px font-size:11px bg:rgb(0_0_0/.5) color:#fff px:6px py:2px r:3px text-align:center white-space:nowrap overflow:hidden text-overflow:ellipsis">PDF</div>
+          {:else if card.type === 'web'}
+            <div class="d:flex flex:column ai:center jc:center gap:6px h:100%">
+              <span class="font-size:24px">🌐</span>
+              <div class="font-size:12px font-weight:600 text-align:center word-break:break-word">{card.text || 'Webカード'}</div>
+              {#if card.url}
+                <div class="font-size:10px opacity:.6 text-align:center word-break:break-all max-h:28px overflow:hidden">{card.url}</div>
+              {/if}
+            </div>
           {:else}
             <div class="font-size:13px lh:1.5 word-break:break-word white-space:pre-wrap">{card.text || ''}</div>
           {/if}
@@ -438,6 +560,34 @@
         {/if}
       </div>
     {/each}
+  </div>
+
+  <!-- Zoom controls (bottom-right) -->
+  <div class="position:absolute bottom:16px right:16px d:flex ai:center gap:2px p:3px bg:$sf b:1|solid|$bd r:10px box-shadow:0|2px|8px|rgb(0_0_0/.2) z:10">
+    <button
+      class="w:30px h:30px d:flex ai:center jc:center r:7px color:$tx font-size:16px bg:rgb(0_0_0/.08):hover"
+      onclick={() => zoomByButton(1 / 1.2)}
+      onpointerdown={(e) => e.stopPropagation()}
+      title="縮小"
+    >−</button>
+    <button
+      class="px:6px h:30px d:flex ai:center jc:center r:7px color:$tx font-size:11px min-w:44px bg:rgb(0_0_0/.08):hover"
+      onclick={() => { scale = 1; }}
+      onpointerdown={(e) => e.stopPropagation()}
+      title="100%に戻す"
+    >{Math.round(scale * 100)}%</button>
+    <button
+      class="w:30px h:30px d:flex ai:center jc:center r:7px color:$tx font-size:16px bg:rgb(0_0_0/.08):hover"
+      onclick={() => zoomByButton(1.2)}
+      onpointerdown={(e) => e.stopPropagation()}
+      title="拡大"
+    >＋</button>
+    <button
+      class="px:8px h:30px d:flex ai:center jc:center r:7px color:$tx font-size:11px bg:rgb(0_0_0/.08):hover"
+      onclick={zoomFit}
+      onpointerdown={(e) => e.stopPropagation()}
+      title="すべてのカードを表示"
+    >全体</button>
   </div>
 
   <!-- Context menu -->
@@ -452,6 +602,11 @@
       <button class="d:block w:100% px:16px py:8px text-align:left font-size:13px color:$tx bg:$pri:hover color:#fff:hover" onclick={() => { colorPickerCardId = contextMenuCardId; colorPickerPos = contextMenuPos; contextMenuCardId = null; }}>
         色を変更
       </button>
+      {#if connectors.some((c) => c.fromCardId === contextMenuCardId || c.toCardId === contextMenuCardId)}
+        <button class="d:block w:100% px:16px py:8px text-align:left font-size:13px color:$tx bg:$pri:hover color:#fff:hover" onclick={() => { if (contextMenuCardId) onAlignChain(contextMenuCardId); contextMenuCardId = null; }}>
+          整列
+        </button>
+      {/if}
       <button class="d:block w:100% px:16px py:8px text-align:left font-size:13px color:$tx bg:#ef4444:hover color:#fff:hover" onclick={() => { if (contextMenuCardId) onCardDelete(contextMenuCardId); contextMenuCardId = null; }}>
         削除
       </button>

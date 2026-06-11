@@ -1,6 +1,6 @@
 // === Card-based architecture (LoiLoNote-style) ===
 
-export type CardType = 'text' | 'image' | 'pdf';
+export type CardType = 'text' | 'image' | 'pdf' | 'web';
 
 export interface Card {
   id: string;
@@ -15,6 +15,7 @@ export interface Card {
   // Content
   text: string; // for text cards, the main text; for others, a label
   imageDataUrl: string | null; // for image/pdf cards: preview thumbnail
+  url: string | null; // for web cards: the linked URL
   // Editor canvas data (pen strokes, annotations, sub-objects)
   editorData: string | null; // Fabric.js JSON of the card's internal canvas
   // Metadata
@@ -81,4 +82,4 @@ export interface TextSettings {
 }
 
 // View state
-export type ViewMode = 'canvas' | 'editor';
+export type ViewMode = 'canvas' | 'editor' | 'presentation';
